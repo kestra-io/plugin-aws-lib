@@ -81,22 +81,6 @@ public interface AbstractConnectionInterface {
     @PluginProperty(group = "advanced")
     Property<String> getEndpointOverride();
 
-    @Schema(
-        title = "Enable compatibility mode",
-        description = "Use it to connect to S3 bucket with S3 compatible services that don't support the new transport client."
-    )
-    default Property<Boolean> getCompatibilityMode() {
-        return Property.ofValue(false);
-    }
-
-    @Schema(
-        title = "Force path style access",
-        description = "Must only be used when `compatibilityMode` is enabled."
-    )
-    default Property<Boolean> getForcePathStyle() {
-        return Property.ofValue(false);
-    }
-
     default AbstractConnection.AwsClientConfig awsClientConfig(final RunContext runContext) throws IllegalVariableEvaluationException {
         return new AbstractConnection.AwsClientConfig(
             runContext.render(this.getAccessKeyId()).as(String.class).orElse(null),

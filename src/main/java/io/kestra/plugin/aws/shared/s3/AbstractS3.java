@@ -3,17 +3,35 @@ package io.kestra.plugin.aws.shared.s3;
 import java.net.URI;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.aws.shared.AbstractConnection;
 import io.kestra.plugin.aws.shared.AbstractConnectionInterface;
 import io.kestra.plugin.aws.shared.ConnectionUtils;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3CrtAsyncClientBuilder;
 
 public interface AbstractS3 extends AbstractConnectionInterface {
+    @Schema(
+        title = "Enable compatibility mode",
+        description = "Use it to connect to S3 bucket with S3 compatible services that don't support the new transport client."
+    )
+    default Property<Boolean> getCompatibilityMode() {
+        return Property.ofValue(false);
+    }
+
+    @Schema(
+        title = "Force path style access",
+        description = "Must only be used when `compatibilityMode` is enabled."
+    )
+    default Property<Boolean> getForcePathStyle() {
+        return Property.ofValue(false);
+    }
+
     default S3Client client(final RunContext runContext) throws IllegalVariableEvaluationException {
         final AbstractConnection.AwsClientConfig clientConfig = awsClientConfig(runContext);
         return ConnectionUtils.configureSyncClient(clientConfig, S3Client.builder())

@@ -81,6 +81,10 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
     testImplementation "org.hamcrest:hamcrest"
     testImplementation "org.hamcrest:hamcrest-library"
+
+    // commons-lang3 is used by ConnectionUtils; it reaches main via the compileOnly Kestra core,
+    // so it must be declared explicitly for the test runtime classpath.
+    testImplementation "org.apache.commons:commons-lang3"
 }
 
 /**********************************************************************************************************************\
