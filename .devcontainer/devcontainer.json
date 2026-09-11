@@ -1,10 +1,10 @@
 {
-  "name": "plugin-template",
+  "name": "plugin-aws-lib",
   "build": {
     "context": ".",
     "dockerfile": "Dockerfile"
   },
-  "workspaceFolder": "/workspaces/plugin-template",
+  "workspaceFolder": "/workspaces/plugin-aws-lib",
   "forwardPorts": [8080],
   "customizations": {
     "vscode": {

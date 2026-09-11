@@ -1,8 +1,8 @@
-# Kestra Template Plugin
+# Kestra AWS Lib Plugin
 
 ## What
 
-- Provides plugin components under `io.kestra.plugin.templates`.
+- Provides plugin components under `io.kestra.plugin.aws-lib`.
 - Includes classes such as `Example`, `Trigger`.
 
 ## Why
@@ -17,7 +17,7 @@
 
 Single-module plugin. Source packages under `io.kestra.plugin`:
 
-- `templates`
+- `aws-lib`
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -25,14 +25,14 @@ Infrastructure dependencies (Docker Compose services):
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.templates.Example`
+- `io.kestra.plugin.aws-lib.Example`
 
 ### Project Structure
 
 ```
-plugin-template/
-├── src/main/java/io/kestra/plugin/templates/
-├── src/test/java/io/kestra/plugin/templates/
+plugin-aws-lib/
+├── src/main/java/io/kestra/plugin/aws-lib/
+├── src/test/java/io/kestra/plugin/aws-lib/
 ├── build.gradle
 └── README.md
 ```
