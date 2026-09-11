@@ -1,45 +1,61 @@
-# Kestra AWS Lib Plugin
+# AGENTS.md
 
 ## What
 
-- Provides plugin components under `io.kestra.plugin.aws-lib`.
-- Includes classes such as `Example`, `Trigger`.
+This is a **library**, not an installable Kestra plugin. It produces no plugin jar (no shadow jar,
+no `@Plugin` classes, no plugin doc/icons/metadata), and it is not indexed by the Kestra plugin
+registry (`generate-shadowjar: false`, `skip-indexing: true` in CI).
+
+- Provides the shared kernel under `io.kestra.plugin.aws.shared`, consumed by both `plugin-aws`
+  (OSS) and `plugin-ee-aws` (EE).
+- Includes: `AbstractConnection` (incl. nested `AwsClientConfig` record), `AbstractConnectionInterface`,
+  `ConnectionUtils`, `s3.AbstractS3`.
 
 ## Why
 
-- What user problem does this solve? Teams need a concrete starting point for building and validating new Kestra plugins without recreating the same project scaffolding from scratch.
-- Why would a team adopt this plugin in a workflow? It gives plugin authors a ready-made reference repo they can adapt alongside their own build, test, and publishing workflow.
-- What operational/business outcome does it enable? It shortens plugin delivery time, reduces setup mistakes, and makes internal or partner plugin development more repeatable.
+- `plugin-aws` and `plugin-ee-aws` used to each carry their own copy of the AWS connection/auth and
+  S3-client code. The copies drifted (see git history around kestra-ee#7113): OSS gained an SSRF
+  fix (`ConnectionUtils.rejectLinkLocalMetadataHost`), `forcePathStyle`, HTTP client tuning, and
+  secret-masking annotations that EE never received.
+- Centralizing this code in one published artifact means both editions build on the same
+  connection/auth/S3-client behavior going forward, instead of silently diverging again.
 
 ## How
 
-### Architecture
+### What belongs in the lib
 
-Single-module plugin. Source packages under `io.kestra.plugin`:
+Only code needed by **both** `plugin-aws` and `plugin-ee-aws`: AWS credential/connection wiring,
+STS assume-role support, and the S3 client factory. It is deliberately minimal — this is not a
+place to add new tasks, triggers, or service-specific clients.
 
-- `aws-lib`
+### What does not belong here
 
-Infrastructure dependencies (Docker Compose services):
+- OSS-only tasks/triggers (athena, dynamodb, kinesis, lambda, sns, sqs, s3 tasks, etc.) — stay in
+  `plugin-aws`.
+- EE-only code (`batch.Run`, `runner.Batch`, `runner.Ec2`, `runner.Ec2CloudWatchLogTail`,
+  `runner.S3StagingUtils`, `cloudwatch.LogExporter`, `s3.LogExporter`) — stays in `plugin-ee-aws`.
+- Unit tests for the shared classes — they stay in the consumer repos (`plugin-aws`,
+  `plugin-ee-aws`), not in this library.
 
-- `app`
+### Release order
 
-### Key Plugin Classes
-
-- `io.kestra.plugin.aws-lib.Example`
+This library must be released (or at least published as a resolvable snapshot) **before** bumping
+the version pinned by `plugin-aws` and `plugin-ee-aws`. Both consumers resolve
+`io.kestra.plugin:plugin-aws-lib:<version>` from Maven Central (or `mavenLocal()` /
+the Sonatype snapshot repo during development).
 
 ### Project Structure
 
 ```
 plugin-aws-lib/
-├── src/main/java/io/kestra/plugin/aws-lib/
-├── src/test/java/io/kestra/plugin/aws-lib/
+├── src/main/java/io/kestra/plugin/aws/shared/
+│   ├── AbstractConnection.java
+│   ├── AbstractConnectionInterface.java
+│   ├── ConnectionUtils.java
+│   └── s3/AbstractS3.java
 ├── build.gradle
 └── README.md
 ```
-
-## Local rules
-
-- Base the wording on the implemented packages and classes, not on template README text.
 
 ## References
 

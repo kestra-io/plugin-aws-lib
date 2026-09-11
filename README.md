@@ -35,36 +35,20 @@
 </p>
 <p align="center" style="color:grey;"><i>Get started with Kestra in 3 minutes.</i></p>
 
-# Kestra AWS Lib Plugin
+# Kestra AWS Lib
 
-## Why
+This is a **library**, not an installable Kestra plugin: it produces no plugin jar, is not shadowed,
+and is not indexed by the Kestra plugin registry. It exists to hold the shared kernel used by both
+[`plugin-aws`](https://github.com/kestra-io/plugin-aws) (OSS) and `plugin-ee-aws` (EE): AWS
+connection/authentication (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
+and the S3 client factory (`s3.AbstractS3`), under `io.kestra.plugin.aws.shared`.
 
-- What user problem does this solve? Teams need a concrete starting point for building and validating new Kestra plugins without recreating the same project scaffolding from scratch.
-- Why would a team adopt this plugin in a workflow? It gives plugin authors a ready-made reference repo they can adapt alongside their own build, test, and publishing workflow.
-- What operational/business outcome does it enable? It shortens plugin delivery time, reduces setup mistakes, and makes internal or partner plugin development more repeatable.
+Anything needed by both editions belongs here. OSS-only tasks/triggers stay in `plugin-aws`; EE-only
+code (task runners, batch/log-exporter tasks) stays in `plugin-ee-aws`.
 
-## What
-
-- Provides plugin components under `io.kestra.plugin.aws-lib`.
-- Includes classes such as `Example`, `Trigger`.
-
-## Running Kestra locally with this plugin
-
-1. Build the shadow JAR: `./gradlew shadowJar`. The output lands in `build/libs/`.
-2. Run `docker compose up`. `docker-compose.yml` builds `kestra/kestra:latest` and mounts `build/libs/` to `/app/plugins/`, so Kestra picks up the jar on startup.
-3. Kestra UI is available at [localhost:8080](http://localhost:8080).
-
-### Plugins folder gotcha
-
-Mounting a host folder onto `/app/plugins/` replaces the container's plugins directory rather than adding to it. Core plugins (the ones logged as `Registered N core plugins`) are compiled into Kestra itself and aren't affected, but any additional plugin normally bundled in the base image under `/app/plugins/` (e.g. the Python script plugin) gets hidden once the mount is in place. If a flow you're testing depends on another plugin, copy its jar into `build/libs/` too before starting the container.
-
-### JFR startup error
-
-On some hosts, `command: server local` fails with:
-```
-Unable to create JFR repository directory using base location (/tmp)
-```
-`docker-compose.yml` works around this by mounting `/tmp` as `tmpfs`. If you build your own compose file or run Kestra via `docker run`, add the same workaround, e.g. `-v /tmp:/tmp` or `--tmpfs /tmp`. Tracked upstream in [kestra-io/kestra#17405](https://github.com/kestra-io/kestra/issues/17405).
+Consumers declare `implementation 'io.kestra.plugin:plugin-aws-lib:<version>'` and their own
+`shadowJar { mergeServiceFiles() }` bundles this library's classes into their plugin jar. Release
+order: this library first, then bump the version pinned by `plugin-aws` and `plugin-ee-aws`.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)

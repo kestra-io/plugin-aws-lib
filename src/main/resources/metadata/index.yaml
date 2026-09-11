@@ -1,8 +1,0 @@
-group: io.kestra.plugin.aws-lib
-name: "aws-lib"
-title: "AWS Lib"
-description: "AWS Lib plugin for Kestra"
-body: ""
-videos: []
-createdBy: "Kestra Core Team"
-managedBy: "Kestra Core Team"
