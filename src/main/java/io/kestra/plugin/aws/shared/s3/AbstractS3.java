@@ -26,7 +26,7 @@ public interface AbstractS3 extends AbstractConnectionInterface {
 
     @Schema(
         title = "Force path style access",
-        description = "Must only be used when `compatibilityMode` is enabled."
+        description = "Use path-style URLs (`https://endpoint/bucket/key`) instead of virtual-hosted-style URLs (`https://bucket.endpoint/key`). Required by most S3-compatible services such as MinIO, RustFS or LocalStack. Works with or without `compatibilityMode`."
     )
     default Property<Boolean> getForcePathStyle() {
         return Property.ofValue(false);
@@ -46,12 +46,9 @@ public interface AbstractS3 extends AbstractConnectionInterface {
                 .forcePathStyle(runContext.render(this.getForcePathStyle()).as(Boolean.class).orElse(false))
                 .build();
         } else {
-            if (runContext.render(this.getForcePathStyle()).as(Boolean.class).orElse(false)) {
-                throw new IllegalArgumentException("'forcePathStyle' must be used in conjunction with 'compatibilityMode'");
-            }
-
             S3CrtAsyncClientBuilder s3ClientBuilder = S3AsyncClient.crtBuilder()
-                .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+                .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig))
+                .forcePathStyle(runContext.render(this.getForcePathStyle()).as(Boolean.class).orElse(false));
 
             if (clientConfig.region() != null) {
                 s3ClientBuilder.region(Region.of(clientConfig.region()));
