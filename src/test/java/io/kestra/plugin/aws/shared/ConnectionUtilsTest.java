@@ -11,9 +11,11 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCredentialsProvider;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -39,7 +41,62 @@ class ConnectionUtilsTest {
         );
     }
 
+    private static AbstractConnection.AwsClientConfig webIdentityConfig(String stsRoleArn, String webIdentityToken) {
+        return new AbstractConnection.AwsClientConfig(
+            null,
+            null,
+            null,
+            stsRoleArn,
+            null,
+            null,
+            null,
+            Duration.ofSeconds(900),
+            "us-east-1",
+            null,
+            webIdentityToken
+        );
+    }
+
     // --- credentialsProvider selection ---
+    @Test
+    void credentialsProvider_shouldUseWebIdentityWhenRoleArnAndTokenAreSet() {
+        var provider = ConnectionUtils.credentialsProvider(
+            webIdentityConfig("arn:aws:iam::123456789012:role/demo", "eyJhbGciOiJSUzI1NiJ9.e30.sig")
+        );
+        assertThat(provider, instanceOf(StsAssumeRoleWithWebIdentityCredentialsProvider.class));
+    }
+
+    @Test
+    void webIdentityRequest_shouldAskTheSupplierForTheTokenOnEveryRequest() {
+        // oidcToken() mints a short-lived token: replaying the first render on the SDK's session refresh would fail.
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var config = new AbstractConnection.AwsClientConfig(
+            null, null, null, "arn:aws:iam::123456789012:role/demo", null, null, null,
+            Duration.ofSeconds(900), "us-east-1", null, "first", () -> "token-" + calls.incrementAndGet()
+        );
+
+        var first = ConnectionUtils.webIdentityRequest(config, "session");
+        var second = ConnectionUtils.webIdentityRequest(config, "session");
+
+        assertThat(first.webIdentityToken(), is("token-1"));
+        assertThat(second.webIdentityToken(), is("token-2"));
+        assertThat(first.roleArn(), is("arn:aws:iam::123456789012:role/demo"));
+        assertThat(first.durationSeconds(), is(900));
+    }
+
+    @Test
+    void webIdentityRequest_shouldReuseTheRenderedTokenWithoutSupplier() {
+        var request = ConnectionUtils.webIdentityRequest(webIdentityConfig("arn:aws:iam::123456789012:role/demo", "rendered-once"), "session");
+
+        assertThat(request.webIdentityToken(), is("rendered-once"));
+    }
+
+    @Test
+    void credentialsProvider_shouldIgnoreTokenWithoutRoleArn() {
+        var provider = ConnectionUtils.credentialsProvider(webIdentityConfig(null, "eyJhbGciOiJSUzI1NiJ9.e30.sig"));
+        assertThat(provider, instanceOf(DefaultCredentialsProvider.class));
+    }
+
 
     @Test
     void credentialsProvider_shouldUseStsAssumeRoleWhenRoleArnIsSet() {

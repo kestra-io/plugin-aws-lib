@@ -3,6 +3,7 @@ package io.kestra.plugin.aws.shared;
 import java.time.Duration;
 
 import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.exceptions.KestraRuntimeException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -40,6 +41,17 @@ public interface AbstractConnectionInterface {
     )
     @PluginProperty(group = "advanced")
     Property<String> getStsRoleArn();
+
+    @Schema(
+        title = "OIDC token to assume the STS role with",
+        description = "When set together with `stsRoleArn`, the role is assumed through `AssumeRoleWithWebIdentity` and no AWS credentials are needed at all: AWS verifies the token against the identity provider that issued it. " +
+            "Use `{{ oidcToken(audience='sts.amazonaws.com') }}` to have Kestra Enterprise mint one for the running execution. " +
+            "The resulting credentials last `stsRoleSessionDuration`; the token expression is rendered again at every refresh, so a short-lived token keeps working for a long task."
+    )
+    @PluginProperty(group = "advanced", secret = true)
+    default Property<String> getWebIdentityToken() {
+        return null;
+    }
 
     @Schema(
         title = "AWS STS External Id",
@@ -92,7 +104,24 @@ public interface AbstractConnectionInterface {
             runContext.render(this.getStsEndpointOverride()).as(String.class).orElse(null),
             runContext.render(this.getStsRoleSessionDuration()).as(Duration.class).orElse(null),
             runContext.render(this.getRegion()).as(String.class).orElse(null),
-            runContext.render(this.getEndpointOverride()).as(String.class).orElse(null)
+            runContext.render(this.getEndpointOverride()).as(String.class).orElse(null),
+            runContext.render(this.getWebIdentityToken()).as(String.class).orElse(null),
+            this.getWebIdentityToken() == null ? null : () -> freshWebIdentityToken(runContext)
         );
+    }
+
+    /**
+     * Renders the token again, bypassing the property cache, for every STS call: a token minted by
+     * {@code oidcToken()} lives minutes while a task may run for hours, so replaying the first one would
+     * fail the first session refresh.
+     */
+    private String freshWebIdentityToken(RunContext runContext) {
+        try {
+            return runContext.render(this.getWebIdentityToken()).skipCache().as(String.class)
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new KestraRuntimeException("webIdentityToken rendered to an empty value while refreshing the STS session."));
+        } catch (IllegalVariableEvaluationException e) {
+            throw new KestraRuntimeException("Cannot render webIdentityToken while refreshing the STS session: " + e.getMessage(), e);
+        }
     }
 }
