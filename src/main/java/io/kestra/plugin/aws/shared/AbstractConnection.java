@@ -39,6 +39,10 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
     @Builder.Default
     protected Property<Duration> stsRoleSessionDuration = Property.ofValue(AbstractConnectionInterface.AWS_MIN_STS_ROLE_SESSION_DURATION);
 
+    @PluginProperty(secret = true, group = "advanced")
+    @ToString.Exclude
+    protected Property<String> webIdentityToken;
+
     /**
      * Common AWS Client configuration properties.
      */
@@ -52,6 +56,21 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
         @Nullable String stsEndpointOverride,
         Duration stsRoleSessionDuration,
         @Nullable String region,
-        @Nullable String endpointOverride) {
+        @Nullable String endpointOverride,
+        @Nullable String webIdentityToken) {
+
+        public AwsClientConfig(
+            @Nullable String accessKeyId,
+            @Nullable String secretKeyId,
+            @Nullable String sessionToken,
+            @Nullable String stsRoleArn,
+            @Nullable String stsRoleExternalId,
+            @Nullable String stsRoleSessionName,
+            @Nullable String stsEndpointOverride,
+            Duration stsRoleSessionDuration,
+            @Nullable String region,
+            @Nullable String endpointOverride) {
+            this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, null);
+        }
     }
 }

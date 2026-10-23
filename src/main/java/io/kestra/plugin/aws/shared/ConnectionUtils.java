@@ -20,7 +20,9 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.StsClientBuilder;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCredentialsProvider;
 import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
+import software.amazon.awssdk.services.sts.model.AssumeRoleWithWebIdentityRequest;
 
 public class ConnectionUtils {
     /**
@@ -31,8 +33,10 @@ public class ConnectionUtils {
      */
     public static AwsCredentialsProvider credentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
 
-        // StsAssumeRoleCredentialsProvider
         if (StringUtils.isNotEmpty(awsClientConfig.stsRoleArn())) {
+            if (StringUtils.isNotEmpty(awsClientConfig.webIdentityToken())) {
+                return stsAssumeRoleWithWebIdentityCredentialsProvider(awsClientConfig);
+            }
             return stsAssumeRoleCredentialsProvider(awsClientConfig);
         }
 
@@ -65,10 +69,27 @@ public class ConnectionUtils {
         return StaticCredentialsProvider.create(credentials);
     }
 
+    /**
+     * Assumes the role with an OIDC token instead of AWS credentials: the STS call is unsigned, so the
+     * provider needs no credentials of its own and the SDK refreshes the session until the token expires.
+     */
+    public static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        final AssumeRoleWithWebIdentityRequest request = AssumeRoleWithWebIdentityRequest.builder()
+            .roleArn(awsClientConfig.stsRoleArn())
+            .roleSessionName(roleSessionName(awsClientConfig))
+            .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
+            .webIdentityToken(awsClientConfig.webIdentityToken())
+            .build();
+
+        return StsAssumeRoleWithWebIdentityCredentialsProvider.builder()
+            .stsClient(stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build())
+            .refreshRequest(request)
+            .build();
+    }
+
     public static StsAssumeRoleCredentialsProvider stsAssumeRoleCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
 
-        String roleSessionName = awsClientConfig.stsRoleSessionName();
-        roleSessionName = roleSessionName != null ? roleSessionName : "kestra-plugin-s3-" + System.currentTimeMillis();
+        String roleSessionName = roleSessionName(awsClientConfig);
 
         final AssumeRoleRequest assumeRoleRequest = AssumeRoleRequest.builder()
             .roleArn(awsClientConfig.stsRoleArn())
@@ -83,7 +104,16 @@ public class ConnectionUtils {
             .build();
     }
 
+    private static String roleSessionName(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        String roleSessionName = awsClientConfig.stsRoleSessionName();
+        return roleSessionName != null ? roleSessionName : "kestra-plugin-s3-" + System.currentTimeMillis();
+    }
+
     public static StsClient stsClient(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        return stsClientBuilder(awsClientConfig).build();
+    }
+
+    private static StsClientBuilder stsClientBuilder(final AbstractConnection.AwsClientConfig awsClientConfig) {
         StsClientBuilder builder = StsClient.builder();
 
         final String stsEndpointOverride = awsClientConfig.stsEndpointOverride();
@@ -97,7 +127,7 @@ public class ConnectionUtils {
         if (regionString != null) {
             builder.applyMutation(stsClientBuilder -> stsClientBuilder.region(Region.of(regionString)));
         }
-        return builder.build();
+        return builder;
     }
 
     /**

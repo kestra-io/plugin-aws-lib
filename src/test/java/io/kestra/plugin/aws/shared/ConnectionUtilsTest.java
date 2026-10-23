@@ -11,6 +11,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCredentialsProvider;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
@@ -39,7 +40,37 @@ class ConnectionUtilsTest {
         );
     }
 
+    private static AbstractConnection.AwsClientConfig webIdentityConfig(String stsRoleArn, String webIdentityToken) {
+        return new AbstractConnection.AwsClientConfig(
+            null,
+            null,
+            null,
+            stsRoleArn,
+            null,
+            null,
+            null,
+            Duration.ofSeconds(900),
+            "us-east-1",
+            null,
+            webIdentityToken
+        );
+    }
+
     // --- credentialsProvider selection ---
+    @Test
+    void credentialsProvider_shouldUseWebIdentityWhenRoleArnAndTokenAreSet() {
+        var provider = ConnectionUtils.credentialsProvider(
+            webIdentityConfig("arn:aws:iam::123456789012:role/demo", "eyJhbGciOiJSUzI1NiJ9.e30.sig")
+        );
+        assertThat(provider, instanceOf(StsAssumeRoleWithWebIdentityCredentialsProvider.class));
+    }
+
+    @Test
+    void credentialsProvider_shouldIgnoreTokenWithoutRoleArn() {
+        var provider = ConnectionUtils.credentialsProvider(webIdentityConfig(null, "eyJhbGciOiJSUzI1NiJ9.e30.sig"));
+        assertThat(provider, instanceOf(DefaultCredentialsProvider.class));
+    }
+
 
     @Test
     void credentialsProvider_shouldUseStsAssumeRoleWhenRoleArnIsSet() {
