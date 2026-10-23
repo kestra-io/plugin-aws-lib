@@ -71,19 +71,24 @@ public class ConnectionUtils {
 
     /**
      * Assumes the role with an OIDC token instead of AWS credentials: the STS call is unsigned, so the
-     * provider needs no credentials of its own and the SDK refreshes the session until the token expires.
+     * provider needs no credentials of its own. The request is rebuilt for every STS call so a session
+     * refresh presents the token the supplier returns now, not the one rendered at task start.
      */
     public static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
-        final AssumeRoleWithWebIdentityRequest request = AssumeRoleWithWebIdentityRequest.builder()
-            .roleArn(awsClientConfig.stsRoleArn())
-            .roleSessionName(roleSessionName(awsClientConfig))
-            .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
-            .webIdentityToken(awsClientConfig.webIdentityToken())
-            .build();
+        final String roleSessionName = roleSessionName(awsClientConfig);
 
         return StsAssumeRoleWithWebIdentityCredentialsProvider.builder()
             .stsClient(stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build())
-            .refreshRequest(request)
+            .refreshRequest(() -> webIdentityRequest(awsClientConfig, roleSessionName))
+            .build();
+    }
+
+    static AssumeRoleWithWebIdentityRequest webIdentityRequest(final AbstractConnection.AwsClientConfig awsClientConfig, final String roleSessionName) {
+        return AssumeRoleWithWebIdentityRequest.builder()
+            .roleArn(awsClientConfig.stsRoleArn())
+            .roleSessionName(roleSessionName)
+            .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
+            .webIdentityToken(awsClientConfig.webIdentityTokenSupplier().get())
             .build();
     }
 
