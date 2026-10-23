@@ -15,6 +15,7 @@ import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCred
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -63,6 +64,31 @@ class ConnectionUtilsTest {
             webIdentityConfig("arn:aws:iam::123456789012:role/demo", "eyJhbGciOiJSUzI1NiJ9.e30.sig")
         );
         assertThat(provider, instanceOf(StsAssumeRoleWithWebIdentityCredentialsProvider.class));
+    }
+
+    @Test
+    void webIdentityRequest_shouldAskTheSupplierForTheTokenOnEveryRequest() {
+        // oidcToken() mints a short-lived token: replaying the first render on the SDK's session refresh would fail.
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var config = new AbstractConnection.AwsClientConfig(
+            null, null, null, "arn:aws:iam::123456789012:role/demo", null, null, null,
+            Duration.ofSeconds(900), "us-east-1", null, "first", () -> "token-" + calls.incrementAndGet()
+        );
+
+        var first = ConnectionUtils.webIdentityRequest(config, "session");
+        var second = ConnectionUtils.webIdentityRequest(config, "session");
+
+        assertThat(first.webIdentityToken(), is("token-1"));
+        assertThat(second.webIdentityToken(), is("token-2"));
+        assertThat(first.roleArn(), is("arn:aws:iam::123456789012:role/demo"));
+        assertThat(first.durationSeconds(), is(900));
+    }
+
+    @Test
+    void webIdentityRequest_shouldReuseTheRenderedTokenWithoutSupplier() {
+        var request = ConnectionUtils.webIdentityRequest(webIdentityConfig("arn:aws:iam::123456789012:role/demo", "rendered-once"), "session");
+
+        assertThat(request.webIdentityToken(), is("rendered-once"));
     }
 
     @Test

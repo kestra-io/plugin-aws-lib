@@ -1,6 +1,7 @@
 package io.kestra.plugin.aws.shared;
 
 import java.time.Duration;
+import java.util.function.Supplier;
 
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
@@ -57,7 +58,33 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
         Duration stsRoleSessionDuration,
         @Nullable String region,
         @Nullable String endpointOverride,
-        @Nullable String webIdentityToken) {
+        @Nullable String webIdentityToken,
+        @Nullable Supplier<String> webIdentityTokenSupplier) {
+
+        /**
+         * @param webIdentityTokenSupplier returns the token for every STS call, so a refresh after the first
+         *        token expired can present a fresh one; null means the token is reused as rendered
+         */
+        public AwsClientConfig {
+            if (webIdentityTokenSupplier == null && webIdentityToken != null) {
+                webIdentityTokenSupplier = () -> webIdentityToken;
+            }
+        }
+
+        public AwsClientConfig(
+            @Nullable String accessKeyId,
+            @Nullable String secretKeyId,
+            @Nullable String sessionToken,
+            @Nullable String stsRoleArn,
+            @Nullable String stsRoleExternalId,
+            @Nullable String stsRoleSessionName,
+            @Nullable String stsEndpointOverride,
+            Duration stsRoleSessionDuration,
+            @Nullable String region,
+            @Nullable String endpointOverride,
+            @Nullable String webIdentityToken) {
+            this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, webIdentityToken, null);
+        }
 
         public AwsClientConfig(
             @Nullable String accessKeyId,
@@ -70,7 +97,7 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
             Duration stsRoleSessionDuration,
             @Nullable String region,
             @Nullable String endpointOverride) {
-            this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, null);
+            this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, null, null);
         }
     }
 }
