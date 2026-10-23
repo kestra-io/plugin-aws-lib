@@ -42,6 +42,17 @@ public interface AbstractConnectionInterface {
     Property<String> getStsRoleArn();
 
     @Schema(
+        title = "OIDC token to assume the STS role with",
+        description = "When set together with `stsRoleArn`, the role is assumed through `AssumeRoleWithWebIdentity` and no AWS credentials are needed at all: AWS verifies the token against the identity provider that issued it. " +
+            "Use `{{ oidcToken(audience='sts.amazonaws.com') }}` to have Kestra Enterprise mint one for the running execution. " +
+            "The token is exchanged once per task; the resulting credentials last `stsRoleSessionDuration`."
+    )
+    @PluginProperty(group = "advanced", secret = true)
+    default Property<String> getWebIdentityToken() {
+        return null;
+    }
+
+    @Schema(
         title = "AWS STS External Id",
         description = " A unique identifier that might be required when you assume a role in another account. This property is only used when an `stsRoleArn` is defined."
     )
@@ -92,7 +103,8 @@ public interface AbstractConnectionInterface {
             runContext.render(this.getStsEndpointOverride()).as(String.class).orElse(null),
             runContext.render(this.getStsRoleSessionDuration()).as(Duration.class).orElse(null),
             runContext.render(this.getRegion()).as(String.class).orElse(null),
-            runContext.render(this.getEndpointOverride()).as(String.class).orElse(null)
+            runContext.render(this.getEndpointOverride()).as(String.class).orElse(null),
+            runContext.render(this.getWebIdentityToken()).as(String.class).orElse(null)
         );
     }
 }
