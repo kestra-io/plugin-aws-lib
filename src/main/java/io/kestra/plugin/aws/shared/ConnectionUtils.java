@@ -33,11 +33,15 @@ public class ConnectionUtils {
      */
     public static AwsCredentialsProvider credentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
 
+        if (awsClientConfig.webIdentityTokenSupplier() != null) {
+            requireUsableWebIdentity(awsClientConfig);
+            var stsClient = stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build();
+            return new StsClientClosingCredentialsProvider(stsAssumeRoleWithWebIdentityCredentialsProvider(awsClientConfig, stsClient), stsClient);
+        }
+
         if (StringUtils.isNotEmpty(awsClientConfig.stsRoleArn())) {
-            if (StringUtils.isNotEmpty(awsClientConfig.webIdentityToken())) {
-                return stsAssumeRoleWithWebIdentityCredentialsProvider(awsClientConfig);
-            }
-            return stsAssumeRoleCredentialsProvider(awsClientConfig);
+            var stsClient = stsClient(awsClientConfig);
+            return new StsClientClosingCredentialsProvider(stsAssumeRoleCredentialsProvider(awsClientConfig, stsClient), stsClient);
         }
 
         // StaticCredentialsProvider
@@ -69,16 +73,33 @@ public class ConnectionUtils {
         return StaticCredentialsProvider.create(credentials);
     }
 
+    // Fail instead of falling back to the worker's own identity when keyless auth is configured but unusable.
+    private static void requireUsableWebIdentity(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        if (StringUtils.isEmpty(awsClientConfig.stsRoleArn())) {
+            throw new IllegalArgumentException("webIdentityToken is set but stsRoleArn is empty: set stsRoleArn to the ARN of the role to assume with the token.");
+        }
+        if (awsClientConfig.webIdentityToken() != null && awsClientConfig.webIdentityToken().isBlank()) {
+            throw new IllegalArgumentException("webIdentityToken is blank: check that the webIdentityToken expression, e.g. `oidcToken(...)`, returns a token on this instance.");
+        }
+    }
+
     /**
-     * Assumes the role with an OIDC token instead of AWS credentials: the STS call is unsigned, so the
-     * provider needs no credentials of its own. The request is rebuilt for every STS call so a session
-     * refresh presents the token the supplier returns now, not the one rendered at task start.
+     * Assumes the role with an OIDC token through an unsigned STS call, re-reading the token on every refresh.
+     * The returned provider does not close its {@link StsClient}: prefer {@link #credentialsProvider}.
      */
     public static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
-        final String roleSessionName = roleSessionName(awsClientConfig);
+        return stsAssumeRoleWithWebIdentityCredentialsProvider(
+            awsClientConfig,
+            stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build()
+        );
+    }
+
+    private static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(
+        final AbstractConnection.AwsClientConfig awsClientConfig, final StsClient stsClient) {
+        var roleSessionName = roleSessionName(awsClientConfig);
 
         return StsAssumeRoleWithWebIdentityCredentialsProvider.builder()
-            .stsClient(stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build())
+            .stsClient(stsClient)
             .refreshRequest(() -> webIdentityRequest(awsClientConfig, roleSessionName))
             .build();
     }
@@ -92,11 +113,18 @@ public class ConnectionUtils {
             .build();
     }
 
+    /**
+     * The returned provider does not close its {@link StsClient}: prefer {@link #credentialsProvider}.
+     */
     public static StsAssumeRoleCredentialsProvider stsAssumeRoleCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        return stsAssumeRoleCredentialsProvider(awsClientConfig, stsClient(awsClientConfig));
+    }
 
-        String roleSessionName = roleSessionName(awsClientConfig);
+    private static StsAssumeRoleCredentialsProvider stsAssumeRoleCredentialsProvider(
+        final AbstractConnection.AwsClientConfig awsClientConfig, final StsClient stsClient) {
+        var roleSessionName = roleSessionName(awsClientConfig);
 
-        final AssumeRoleRequest assumeRoleRequest = AssumeRoleRequest.builder()
+        var assumeRoleRequest = AssumeRoleRequest.builder()
             .roleArn(awsClientConfig.stsRoleArn())
             .roleSessionName(roleSessionName)
             .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
@@ -104,13 +132,13 @@ public class ConnectionUtils {
             .build();
 
         return StsAssumeRoleCredentialsProvider.builder()
-            .stsClient(stsClient(awsClientConfig))
+            .stsClient(stsClient)
             .refreshRequest(assumeRoleRequest)
             .build();
     }
 
     private static String roleSessionName(final AbstractConnection.AwsClientConfig awsClientConfig) {
-        String roleSessionName = awsClientConfig.stsRoleSessionName();
+        var roleSessionName = awsClientConfig.stsRoleSessionName();
         return roleSessionName != null ? roleSessionName : "kestra-plugin-s3-" + System.currentTimeMillis();
     }
 
@@ -149,8 +177,7 @@ public class ConnectionUtils {
                     .maxConnections(100)
                     .connectionTimeout(Duration.ofSeconds(10))
                     .build()
-            )
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            );
 
         return configureClient(clientConfig, builder);
     }
@@ -163,8 +190,7 @@ public class ConnectionUtils {
 
         builder
             // Use the httpClientBuilder to delegate the lifecycle management of the HTTP client to the AWS SDK
-            .httpClientBuilder(serviceDefaults -> NettyNioAsyncHttpClient.builder().build())
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            .httpClientBuilder(serviceDefaults -> NettyNioAsyncHttpClient.builder().build());
         return configureClient(clientConfig, builder);
     }
 
@@ -184,8 +210,7 @@ public class ConnectionUtils {
                     .maxConcurrency(maxConcurrency)
                     .connectionAcquisitionTimeout(connectionAcquisitionTimeout)
                     .build()
-            )
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            );
         return configureClient(clientConfig, builder);
     }
 

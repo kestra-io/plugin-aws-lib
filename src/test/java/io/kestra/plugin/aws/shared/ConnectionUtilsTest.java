@@ -1,7 +1,10 @@
 package io.kestra.plugin.aws.shared;
 
+import java.lang.reflect.Proxy;
 import java.net.URI;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +18,7 @@ import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCred
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.instanceOf;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +41,8 @@ class ConnectionUtilsTest {
             null,
             Duration.ofSeconds(900),
             "us-east-1",
+            null,
+            null,
             null
         );
     }
@@ -63,13 +69,55 @@ class ConnectionUtilsTest {
         var provider = ConnectionUtils.credentialsProvider(
             webIdentityConfig("arn:aws:iam::123456789012:role/demo", "eyJhbGciOiJSUzI1NiJ9.e30.sig")
         );
-        assertThat(provider, instanceOf(StsAssumeRoleWithWebIdentityCredentialsProvider.class));
+        assertThat(provider, instanceOf(StsClientClosingCredentialsProvider.class));
+        assertThat(((StsClientClosingCredentialsProvider) provider).delegate(), instanceOf(StsAssumeRoleWithWebIdentityCredentialsProvider.class));
+    }
+
+    @Test
+    void credentialsProvider_shouldFailWhenTokenIsBlank() {
+        var exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> ConnectionUtils.credentialsProvider(webIdentityConfig("arn:aws:iam::123456789012:role/demo", " "))
+        );
+        assertThat(exception.getMessage(), containsString("webIdentityToken"));
+    }
+
+    @Test
+    void stsClientClosingCredentialsProvider_shouldCloseTheStsClient() {
+        var closed = new AtomicBoolean();
+        var stsClient = (StsClient) Proxy.newProxyInstance(
+            StsClient.class.getClassLoader(),
+            new Class<?>[]{StsClient.class},
+            (proxy, method, args) -> {
+                if (method.getName().equals("close")) {
+                    closed.set(true);
+                }
+                return null;
+            }
+        );
+
+        new StsClientClosingCredentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("ak", "sk")), stsClient).close();
+
+        assertThat(closed.get(), is(true));
+    }
+
+    @Test
+    void withStsRoleSessionDuration_shouldKeepTheTokenSupplier() {
+        var config = new AbstractConnection.AwsClientConfig(
+            null, null, null, "arn:aws:iam::123456789012:role/demo", null, null, null,
+            Duration.ofSeconds(900), "us-east-1", null, null, () -> "fresh"
+        );
+
+        var copy = config.withStsRoleSessionDuration(Duration.ofHours(1));
+
+        assertThat(copy.stsRoleSessionDuration(), is(Duration.ofHours(1)));
+        assertThat(copy.webIdentityTokenSupplier().get(), is("fresh"));
     }
 
     @Test
     void webIdentityRequest_shouldAskTheSupplierForTheTokenOnEveryRequest() {
         // oidcToken() mints a short-lived token: replaying the first render on the SDK's session refresh would fail.
-        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var calls = new AtomicInteger();
         var config = new AbstractConnection.AwsClientConfig(
             null, null, null, "arn:aws:iam::123456789012:role/demo", null, null, null,
             Duration.ofSeconds(900), "us-east-1", null, "first", () -> "token-" + calls.incrementAndGet()
@@ -92,11 +140,14 @@ class ConnectionUtilsTest {
     }
 
     @Test
-    void credentialsProvider_shouldIgnoreTokenWithoutRoleArn() {
-        var provider = ConnectionUtils.credentialsProvider(webIdentityConfig(null, "eyJhbGciOiJSUzI1NiJ9.e30.sig"));
-        assertThat(provider, instanceOf(DefaultCredentialsProvider.class));
+    void credentialsProvider_shouldFailWhenTokenIsSetWithoutRoleArn() {
+        // Falling back to the worker's own credentials would silently bypass the configured keyless auth.
+        var exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> ConnectionUtils.credentialsProvider(webIdentityConfig(null, "eyJhbGciOiJSUzI1NiJ9.e30.sig"))
+        );
+        assertThat(exception.getMessage(), containsString("stsRoleArn"));
     }
-
 
     @Test
     void credentialsProvider_shouldUseStsAssumeRoleWhenRoleArnIsSet() {
@@ -104,7 +155,8 @@ class ConnectionUtilsTest {
             config("ak", "sk", null, "arn:aws:iam::123456789012:role/demo")
         );
 
-        assertThat(provider, instanceOf(StsAssumeRoleCredentialsProvider.class));
+        assertThat(provider, instanceOf(StsClientClosingCredentialsProvider.class));
+        assertThat(((StsClientClosingCredentialsProvider) provider).delegate(), instanceOf(StsAssumeRoleCredentialsProvider.class));
     }
 
     @Test
@@ -182,7 +234,7 @@ class ConnectionUtilsTest {
     @Test
     void configureClient_shouldIgnoreBlankEndpointOverride() {
         AbstractConnection.AwsClientConfig config = new AbstractConnection.AwsClientConfig(
-            null, null, null, null, null, null, null, Duration.ofSeconds(900), "us-east-1", ""
+            null, null, null, null, null, null, null, Duration.ofSeconds(900), "us-east-1", "", null, null
         );
 
         assertDoesNotThrow(() -> ConnectionUtils.configureClient(config, StsClient.builder()));

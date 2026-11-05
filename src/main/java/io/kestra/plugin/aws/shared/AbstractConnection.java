@@ -61,10 +61,7 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
         @Nullable String webIdentityToken,
         @Nullable Supplier<String> webIdentityTokenSupplier) {
 
-        /**
-         * @param webIdentityTokenSupplier returns the token for every STS call, so a refresh after the first
-         *        token expired can present a fresh one; null means the token is reused as rendered
-         */
+        // The supplier is asked for a token on every STS call, so a refresh never replays an expired one.
         public AwsClientConfig {
             if (webIdentityTokenSupplier == null && webIdentityToken != null) {
                 webIdentityTokenSupplier = () -> webIdentityToken;
@@ -86,6 +83,10 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
             this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, webIdentityToken, null);
         }
 
+        /**
+         * @deprecated drops the web identity token; to copy a config with a different session duration use {@link #withStsRoleSessionDuration(Duration)}.
+         */
+        @Deprecated
         public AwsClientConfig(
             @Nullable String accessKeyId,
             @Nullable String secretKeyId,
@@ -98,6 +99,10 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
             @Nullable String region,
             @Nullable String endpointOverride) {
             this(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, null, null);
+        }
+
+        public AwsClientConfig withStsRoleSessionDuration(final Duration stsRoleSessionDuration) {
+            return new AwsClientConfig(accessKeyId, secretKeyId, sessionToken, stsRoleArn, stsRoleExternalId, stsRoleSessionName, stsEndpointOverride, stsRoleSessionDuration, region, endpointOverride, webIdentityToken, webIdentityTokenSupplier);
         }
     }
 }
