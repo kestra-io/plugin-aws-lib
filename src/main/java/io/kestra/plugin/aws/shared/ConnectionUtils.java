@@ -20,7 +20,9 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.StsClientBuilder;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleWithWebIdentityCredentialsProvider;
 import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
+import software.amazon.awssdk.services.sts.model.AssumeRoleWithWebIdentityRequest;
 
 public class ConnectionUtils {
     /**
@@ -31,9 +33,15 @@ public class ConnectionUtils {
      */
     public static AwsCredentialsProvider credentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
 
-        // StsAssumeRoleCredentialsProvider
+        if (awsClientConfig.webIdentityTokenSupplier() != null) {
+            requireUsableWebIdentity(awsClientConfig);
+            var stsClient = stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build();
+            return new StsClientClosingCredentialsProvider(stsAssumeRoleWithWebIdentityCredentialsProvider(awsClientConfig, stsClient), stsClient);
+        }
+
         if (StringUtils.isNotEmpty(awsClientConfig.stsRoleArn())) {
-            return stsAssumeRoleCredentialsProvider(awsClientConfig);
+            var stsClient = stsClient(awsClientConfig);
+            return new StsClientClosingCredentialsProvider(stsAssumeRoleCredentialsProvider(awsClientConfig, stsClient), stsClient);
         }
 
         // StaticCredentialsProvider
@@ -65,12 +73,58 @@ public class ConnectionUtils {
         return StaticCredentialsProvider.create(credentials);
     }
 
+    // Fail instead of falling back to the worker's own identity when keyless auth is configured but unusable.
+    private static void requireUsableWebIdentity(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        if (StringUtils.isEmpty(awsClientConfig.stsRoleArn())) {
+            throw new IllegalArgumentException("webIdentityToken is set but stsRoleArn is empty: set stsRoleArn to the ARN of the role to assume with the token.");
+        }
+        if (awsClientConfig.webIdentityToken() != null && awsClientConfig.webIdentityToken().isBlank()) {
+            throw new IllegalArgumentException("webIdentityToken is blank: check that the webIdentityToken expression, e.g. `oidcToken(...)`, returns a token on this instance.");
+        }
+    }
+
+    /**
+     * Assumes the role with an OIDC token through an unsigned STS call, re-reading the token on every refresh.
+     * The returned provider does not close its {@link StsClient}: prefer {@link #credentialsProvider}.
+     */
+    public static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        return stsAssumeRoleWithWebIdentityCredentialsProvider(
+            awsClientConfig,
+            stsClientBuilder(awsClientConfig).credentialsProvider(AnonymousCredentialsProvider.create()).build()
+        );
+    }
+
+    private static StsAssumeRoleWithWebIdentityCredentialsProvider stsAssumeRoleWithWebIdentityCredentialsProvider(
+        final AbstractConnection.AwsClientConfig awsClientConfig, final StsClient stsClient) {
+        var roleSessionName = roleSessionName(awsClientConfig);
+
+        return StsAssumeRoleWithWebIdentityCredentialsProvider.builder()
+            .stsClient(stsClient)
+            .refreshRequest(() -> webIdentityRequest(awsClientConfig, roleSessionName))
+            .build();
+    }
+
+    static AssumeRoleWithWebIdentityRequest webIdentityRequest(final AbstractConnection.AwsClientConfig awsClientConfig, final String roleSessionName) {
+        return AssumeRoleWithWebIdentityRequest.builder()
+            .roleArn(awsClientConfig.stsRoleArn())
+            .roleSessionName(roleSessionName)
+            .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
+            .webIdentityToken(awsClientConfig.webIdentityTokenSupplier().get())
+            .build();
+    }
+
+    /**
+     * The returned provider does not close its {@link StsClient}: prefer {@link #credentialsProvider}.
+     */
     public static StsAssumeRoleCredentialsProvider stsAssumeRoleCredentialsProvider(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        return stsAssumeRoleCredentialsProvider(awsClientConfig, stsClient(awsClientConfig));
+    }
 
-        String roleSessionName = awsClientConfig.stsRoleSessionName();
-        roleSessionName = roleSessionName != null ? roleSessionName : "kestra-plugin-s3-" + System.currentTimeMillis();
+    private static StsAssumeRoleCredentialsProvider stsAssumeRoleCredentialsProvider(
+        final AbstractConnection.AwsClientConfig awsClientConfig, final StsClient stsClient) {
+        var roleSessionName = roleSessionName(awsClientConfig);
 
-        final AssumeRoleRequest assumeRoleRequest = AssumeRoleRequest.builder()
+        var assumeRoleRequest = AssumeRoleRequest.builder()
             .roleArn(awsClientConfig.stsRoleArn())
             .roleSessionName(roleSessionName)
             .durationSeconds((int) awsClientConfig.stsRoleSessionDuration().toSeconds())
@@ -78,12 +132,21 @@ public class ConnectionUtils {
             .build();
 
         return StsAssumeRoleCredentialsProvider.builder()
-            .stsClient(stsClient(awsClientConfig))
+            .stsClient(stsClient)
             .refreshRequest(assumeRoleRequest)
             .build();
     }
 
+    private static String roleSessionName(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        var roleSessionName = awsClientConfig.stsRoleSessionName();
+        return roleSessionName != null ? roleSessionName : "kestra-plugin-s3-" + System.currentTimeMillis();
+    }
+
     public static StsClient stsClient(final AbstractConnection.AwsClientConfig awsClientConfig) {
+        return stsClientBuilder(awsClientConfig).build();
+    }
+
+    private static StsClientBuilder stsClientBuilder(final AbstractConnection.AwsClientConfig awsClientConfig) {
         StsClientBuilder builder = StsClient.builder();
 
         final String stsEndpointOverride = awsClientConfig.stsEndpointOverride();
@@ -97,7 +160,7 @@ public class ConnectionUtils {
         if (regionString != null) {
             builder.applyMutation(stsClientBuilder -> stsClientBuilder.region(Region.of(regionString)));
         }
-        return builder.build();
+        return builder;
     }
 
     /**
@@ -114,8 +177,7 @@ public class ConnectionUtils {
                     .maxConnections(100)
                     .connectionTimeout(Duration.ofSeconds(10))
                     .build()
-            )
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            );
 
         return configureClient(clientConfig, builder);
     }
@@ -128,8 +190,7 @@ public class ConnectionUtils {
 
         builder
             // Use the httpClientBuilder to delegate the lifecycle management of the HTTP client to the AWS SDK
-            .httpClientBuilder(serviceDefaults -> NettyNioAsyncHttpClient.builder().build())
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            .httpClientBuilder(serviceDefaults -> NettyNioAsyncHttpClient.builder().build());
         return configureClient(clientConfig, builder);
     }
 
@@ -149,8 +210,7 @@ public class ConnectionUtils {
                     .maxConcurrency(maxConcurrency)
                     .connectionAcquisitionTimeout(connectionAcquisitionTimeout)
                     .build()
-            )
-            .credentialsProvider(ConnectionUtils.credentialsProvider(clientConfig));
+            );
         return configureClient(clientConfig, builder);
     }
 
